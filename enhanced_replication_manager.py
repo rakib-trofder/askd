@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Enhanced SQL Server Replication Manager
+Fixed Enhanced SQL Server Replication Manager
 
 This enhanced script manages replication between a master SQL Server instance and multiple
-read replicas with automatic setup capabilities for databases, schemas, and tables.
-It can dynamically adapt to configuration changes and automatically set up blank replicas.
+read replicas with automatic setup capabilities and proper data synchronization using MERGE.
 """
 
 import json
@@ -405,20 +404,9 @@ class EnhancedSQLServerReplicationManager:
             self.logger.error(f"Error fetching data from {schema}.{table}: {e}")
             raise
             
-    def _clear_table_data(self, db_config: DatabaseConfig, schema: str, table: str):
-        """Clear all data from a table"""
-        try:
-            with self._get_connection(db_config) as conn:
-                cursor = conn.cursor()
-                cursor.execute(f"DELETE FROM [{schema}].[{table}]")
-                self.logger.info(f"Cleared data from table {schema}.{table}")
-        except Exception as e:
-            self.logger.error(f"Error clearing table {schema}.{table}: {e}")
-            raise
-            
-    def _insert_data(self, db_config: DatabaseConfig, schema: str, table: str, 
-                    data: pd.DataFrame, table_config: TableConfig):
-        """Insert data into a table"""
+    def _merge_data(self, db_config: DatabaseConfig, schema: str, table: str, 
+                   data: pd.DataFrame, table_config: TableConfig):
+        """Merge data into a table using MERGE statement for proper insert/update handling"""
         if data.empty:
             return
             
@@ -441,31 +429,51 @@ class EnhancedSQLServerReplicationManager:
                 if has_identity:
                     cursor.execute(f"SET IDENTITY_INSERT [{schema}].[{table}] ON")
                 
-                # Generate INSERT statement
+                # Create temporary table
+                temp_table = f"#{table}_temp"
+                cursor.execute(f"""
+                    SELECT TOP 0 * INTO {temp_table} FROM [{schema}].[{table}]
+                """)
+                
+                # Insert data into temporary table
                 columns = ', '.join([f'[{col}]' for col in data.columns])
                 placeholders = ', '.join(['?' for _ in data.columns])
-                insert_query = f"INSERT INTO [{schema}].[{table}] ({columns}) VALUES ({placeholders})"
+                insert_temp_query = f"INSERT INTO {temp_table} ({columns}) VALUES ({placeholders})"
                 
-                # Convert DataFrame to list of tuples, handling None values
-                data_tuples = []
-                for _, row in data.iterrows():
-                    tuple_row = tuple(None if pd.isna(val) else val for val in row)
-                    data_tuples.append(tuple_row)
+                # Convert DataFrame to list of tuples
+                data_tuples = [tuple(None if pd.isna(val) else val for val in row) for _, row in data.iterrows()]
                 
-                # Insert data in batches
+                # Insert in batches
                 batch_size = self.config.get('replication', {}).get('batch_size', 1000)
                 for i in range(0, len(data_tuples), batch_size):
                     batch = data_tuples[i:i + batch_size]
-                    cursor.executemany(insert_query, batch)
+                    cursor.executemany(insert_temp_query, batch)
                 
-                # Disable identity insert if it was enabled
+                # Perform MERGE operation
+                non_pk_columns = [col for col in data.columns if col != table_config.primary_key]
+                update_set = ', '.join([f"target.[{col}] = source.[{col}]" for col in non_pk_columns])
+                insert_columns = ', '.join([f"[{col}]" for col in data.columns])
+                insert_values = ', '.join([f"source.[{col}]" for col in data.columns])
+                
+                merge_sql = f"""
+                MERGE [{schema}].[{table}] AS target
+                USING {temp_table} AS source ON target.[{table_config.primary_key}] = source.[{table_config.primary_key}]
+                WHEN MATCHED THEN
+                    UPDATE SET {update_set}
+                WHEN NOT MATCHED BY TARGET THEN
+                    INSERT ({insert_columns}) VALUES ({insert_values});
+                """
+                
+                cursor.execute(merge_sql)
+                cursor.execute(f"DROP TABLE {temp_table}")
+                
                 if has_identity:
                     cursor.execute(f"SET IDENTITY_INSERT [{schema}].[{table}] OFF")
                 
-                self.logger.info(f"Inserted {len(data)} rows into {schema}.{table}")
+                self.logger.info(f"Merged {len(data)} rows into {schema}.{table}")
                 
         except Exception as e:
-            self.logger.error(f"Error inserting data into {schema}.{table}: {e}")
+            self.logger.error(f"Error merging data into {schema}.{table}: {e}")
             raise
             
     def _sync_table_full(self, schema_config: SchemaConfig, table_config: TableConfig, 
@@ -474,20 +482,27 @@ class EnhancedSQLServerReplicationManager:
         self.logger.info(f"Full sync: {schema_config.schema_name}.{table_config.table_name} "
                         f"to {replica_config.host}")
         
-        # Get all data from master
-        master_data = self._get_table_data(
-            self.master_config, 
-            schema_config.schema_name, 
-            table_config.table_name
-        )
-        
-        # Clear replica table
-        self._clear_table_data(replica_config, schema_config.schema_name, table_config.table_name)
-        
-        # Insert data into replica
-        if not master_data.empty:
-            self._insert_data(replica_config, schema_config.schema_name, 
-                            table_config.table_name, master_data, table_config)
+        try:
+            # Get all data from master
+            master_data = self._get_table_data(
+                self.master_config, 
+                schema_config.schema_name, 
+                table_config.table_name
+            )
+            
+            # Clear replica table first
+            with self._get_connection(replica_config) as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"DELETE FROM [{schema_config.schema_name}].[{table_config.table_name}]")
+                
+            # Use merge to insert all data
+            if not master_data.empty:
+                self._merge_data(replica_config, schema_config.schema_name, 
+                               table_config.table_name, master_data, table_config)
+                               
+        except Exception as e:
+            self.logger.error(f"Error in full sync for {schema_config.schema_name}.{table_config.table_name}: {e}")
+            raise
             
     def _sync_table_incremental(self, schema_config: SchemaConfig, table_config: TableConfig, 
                               replica_config: DatabaseConfig):
@@ -497,33 +512,37 @@ class EnhancedSQLServerReplicationManager:
                               f"{schema_config.schema_name}.{table_config.table_name}")
             return
             
-        # Get last sync time
-        table_key = f"{schema_config.schema_name}.{table_config.table_name}.{replica_config.host}"
-        last_sync = self.last_sync_times.get(table_key, datetime.min)
-        
-        # Format timestamp for SQL Server
-        timestamp_str = last_sync.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-        where_clause = f"[{table_config.timestamp_column}] > '{timestamp_str}'"
-        
-        self.logger.info(f"Incremental sync: {schema_config.schema_name}.{table_config.table_name} "
-                        f"to {replica_config.host} since {timestamp_str}")
-        
-        # Get incremental data from master
-        master_data = self._get_table_data(
-            self.master_config, 
-            schema_config.schema_name, 
-            table_config.table_name,
-            where_clause
-        )
-        
-        if not master_data.empty:
-            # For incremental sync, we use a simple insert approach
-            # In production, you might want to implement MERGE logic for updates
-            self._insert_data(replica_config, schema_config.schema_name, 
-                            table_config.table_name, master_data, table_config)
+        try:
+            # Get last sync time
+            table_key = f"{schema_config.schema_name}.{table_config.table_name}.{replica_config.host}"
+            last_sync = self.last_sync_times.get(table_key, datetime.min)
             
-        # Update last sync time
-        self.last_sync_times[table_key] = datetime.now()
+            # Format timestamp for SQL Server
+            timestamp_str = last_sync.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            where_clause = f"[{table_config.timestamp_column}] > '{timestamp_str}'"
+            
+            self.logger.info(f"Incremental sync: {schema_config.schema_name}.{table_config.table_name} "
+                            f"to {replica_config.host} since {timestamp_str}")
+            
+            # Get incremental data from master
+            master_data = self._get_table_data(
+                self.master_config, 
+                schema_config.schema_name, 
+                table_config.table_name,
+                where_clause
+            )
+            
+            if not master_data.empty:
+                # Use merge to handle inserts and updates properly
+                self._merge_data(replica_config, schema_config.schema_name, 
+                               table_config.table_name, master_data, table_config)
+                
+            # Update last sync time
+            self.last_sync_times[table_key] = datetime.now()
+            
+        except Exception as e:
+            self.logger.error(f"Error in incremental sync for {schema_config.schema_name}.{table_config.table_name}: {e}")
+            raise
         
     def _sync_table(self, schema_config: SchemaConfig, table_config: TableConfig, 
                    replica_config: DatabaseConfig):
