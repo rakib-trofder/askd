@@ -139,7 +139,26 @@ def setup_replication(config):
             """
             execute_sql(master_conn_str_db, article_sql)
 
-    # Step 5: Add subscriptions for each replica
+    # Step 5: Ensure distributor_admin login exists on each replica
+    print("\n--- Ensuring distributor_admin login exists on replicas ---")
+    for replica in replicas_config:
+        replica_conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={replica['host']},{replica['port']};UID={replica['username']};PWD={replica['password']}"
+        login_sql_replica = f"""
+            USE master;
+            IF NOT EXISTS (SELECT name FROM sys.server_principals WHERE name = 'distributor_admin')
+            BEGIN
+                CREATE LOGIN [distributor_admin] WITH PASSWORD = N'{distributor_password}', CHECK_EXPIRATION = OFF, CHECK_POLICY = OFF;
+            END;
+            USE {replica['database']};
+            IF NOT EXISTS (SELECT name FROM sys.database_principals WHERE name = 'distributor_admin')
+            BEGIN
+                CREATE USER [distributor_admin] FOR LOGIN [distributor_admin];
+                EXEC sp_addrolemember N'db_owner', N'distributor_admin';
+            END;
+        """
+        execute_sql(replica_conn_str, login_sql_replica)
+
+    # Step 6: Add subscriptions for each replica
     print("\n--- Adding Subscriptions for Replicas ---")
     for replica in replicas_config:
         subscription_sql = f"""
