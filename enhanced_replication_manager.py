@@ -73,6 +73,7 @@ class EnhancedSQLServerReplicationManager:
         self.auto_setup_replicas = self.config.get('replication', {}).get('auto_setup_replicas', True)
         self.create_missing_schemas = self.config.get('replication', {}).get('create_missing_schemas', True)
         self.create_missing_tables = self.config.get('replication', {}).get('create_missing_tables', True)
+        self.replicate_deletes = self.config.get('replication', {}).get('replicate_deletes', True)
         
     def _load_config(self, config_file: str) -> Dict[str, Any]:
         """Load configuration from JSON file"""
@@ -449,7 +450,7 @@ class EnhancedSQLServerReplicationManager:
                     batch = data_tuples[i:i + batch_size]
                     cursor.executemany(insert_temp_query, batch)
                 
-                # Perform MERGE operation
+                # Perform MERGE operation with DELETE support
                 non_pk_columns = [col for col in data.columns if col != table_config.primary_key]
                 update_set = ', '.join([f"target.[{col}] = source.[{col}]" for col in non_pk_columns])
                 insert_columns = ', '.join([f"[{col}]" for col in data.columns])
@@ -461,7 +462,9 @@ class EnhancedSQLServerReplicationManager:
                 WHEN MATCHED THEN
                     UPDATE SET {update_set}
                 WHEN NOT MATCHED BY TARGET THEN
-                    INSERT ({insert_columns}) VALUES ({insert_values});
+                    INSERT ({insert_columns}) VALUES ({insert_values})
+                WHEN NOT MATCHED BY SOURCE THEN
+                    DELETE;
                 """
                 
                 cursor.execute(merge_sql)
@@ -474,6 +477,45 @@ class EnhancedSQLServerReplicationManager:
                 
         except Exception as e:
             self.logger.error(f"Error merging data into {schema}.{table}: {e}")
+            raise
+            
+    def _merge_data_with_deletes(self, db_config: DatabaseConfig, schema: str, table: str, 
+                                master_pks: pd.DataFrame, table_config: TableConfig):
+        """Handle DELETE operations by comparing primary keys between master and replica"""
+        try:
+            with self._get_connection(db_config) as conn:
+                cursor = conn.cursor()
+                
+                # Create temporary table for master primary keys
+                temp_pk_table = f"#{table}_master_pks"
+                cursor.execute(f"""
+                    CREATE TABLE {temp_pk_table} ([{table_config.primary_key}] INT)
+                """)
+                
+                # Insert master primary keys into temp table
+                if not master_pks.empty:
+                    pk_values = [(int(pk),) for pk in master_pks[table_config.primary_key].values]
+                    cursor.executemany(f"INSERT INTO {temp_pk_table} VALUES (?)", pk_values)
+                
+                # Delete records from replica that don't exist in master
+                delete_sql = f"""
+                DELETE FROM [{schema}].[{table}]
+                WHERE [{table_config.primary_key}] NOT IN (
+                    SELECT [{table_config.primary_key}] FROM {temp_pk_table}
+                )
+                """
+                
+                cursor.execute(delete_sql)
+                deleted_count = cursor.rowcount
+                
+                # Drop temporary table
+                cursor.execute(f"DROP TABLE {temp_pk_table}")
+                
+                if deleted_count > 0:
+                    self.logger.info(f"Deleted {deleted_count} rows from {schema}.{table} (records not in master)")
+                
+        except Exception as e:
+            self.logger.error(f"Error handling deletes for {schema}.{table}: {e}")
             raise
             
     def _sync_table_full(self, schema_config: SchemaConfig, table_config: TableConfig, 
@@ -506,7 +548,7 @@ class EnhancedSQLServerReplicationManager:
             
     def _sync_table_incremental(self, schema_config: SchemaConfig, table_config: TableConfig, 
                               replica_config: DatabaseConfig):
-        """Perform incremental synchronization of a table"""
+        """Perform incremental synchronization of a table with DELETE support"""
         if not table_config.timestamp_column:
             self.logger.warning(f"No timestamp column specified for incremental sync of "
                               f"{schema_config.schema_name}.{table_config.table_name}")
@@ -532,10 +574,28 @@ class EnhancedSQLServerReplicationManager:
                 where_clause
             )
             
-            if not master_data.empty:
-                # Use merge to handle inserts and updates properly
-                self._merge_data(replica_config, schema_config.schema_name, 
-                               table_config.table_name, master_data, table_config)
+            # For incremental sync with DELETE support, we need to compare all primary keys
+            # Get all primary keys from master (only if delete replication is enabled)
+            if self.replicate_deletes:
+                master_pks = self._get_table_data(
+                    self.master_config,
+                    schema_config.schema_name,
+                    table_config.table_name,
+                    f""  # Get all records to compare primary keys
+                )[[table_config.primary_key]]  # Only get primary key column
+            else:
+                master_pks = pd.DataFrame()  # Empty dataframe if deletes disabled
+            
+            if not master_data.empty or (self.replicate_deletes and len(master_pks) > 0):
+                # Handle DELETE operations if enabled
+                if self.replicate_deletes and len(master_pks) > 0:
+                    self._merge_data_with_deletes(replica_config, schema_config.schema_name, 
+                                                table_config.table_name, master_pks, table_config)
+                
+                # If we have incremental changes, apply them too
+                if not master_data.empty:
+                    self._merge_data(replica_config, schema_config.schema_name, 
+                                   table_config.table_name, master_data, table_config)
                 
             # Update last sync time
             self.last_sync_times[table_key] = datetime.now()

@@ -1,13 +1,14 @@
 {
   "replication": {
     "enabled": true,
-    "sync_interval_seconds": 30,
+    "sync_interval_seconds": 15,
     "batch_size": 1000,
     "retry_attempts": 3,
     "retry_delay_seconds": 5,
     "auto_setup_replicas": true,
     "create_missing_schemas": true,
-    "create_missing_tables": true
+    "create_missing_tables": true,
+    "replicate_deletes": true
   },
   "master_database": {
     "host": "202.4.127.187",
