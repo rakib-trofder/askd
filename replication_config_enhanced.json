@@ -1,0 +1,76 @@
+{
+  "replication": {
+    "enabled": true,
+    "sync_interval_seconds": 30,
+    "batch_size": 1000,
+    "retry_attempts": 3,
+    "retry_delay_seconds": 5,
+    "auto_setup_replicas": true,
+    "create_missing_schemas": true,
+    "create_missing_tables": true
+  },
+  "master_database": {
+    "host": "202.4.127.187",
+    "port": 3433,
+    "username": "SA",
+    "password": "YourStrongPassword!123",
+    "database": "askd"
+  },
+  "replica_databases": [
+    {
+      "name": "alpha-replica",
+      "host": "202.4.127.187",
+      "port": 3434,
+      "username": "SA",
+      "password": "YourStrongPassword!123",
+      "database": "askd"
+    },
+    {
+      "name": "beta-replica",
+      "host": "202.4.127.187",
+      "port": 3435,
+      "username": "SA",
+      "password": "YourStrongPassword!123",
+      "database": "askd"
+    }
+  ],
+  "schemas_to_replicate": [
+    {
+      "schema_name": "dbo",
+      "tables": [
+        {
+          "table_name": "Employees",
+          "primary_key": "EmployeeID",
+          "replicate": true,
+          "sync_mode": "incremental",
+          "timestamp_column": "ModifiedDate"
+        },
+        {
+          "table_name": "Projects",
+          "primary_key": "ProjectID",
+          "replicate": true,
+          "sync_mode": "incremental",
+          "timestamp_column": "ModifiedDate"
+        },
+        {
+          "table_name": "Tasks",
+          "primary_key": "TaskID",
+          "replicate": true,
+          "sync_mode": "incremental",
+          "timestamp_column": "ModifiedDate"
+        }
+      ]
+    }
+  ],
+  "logging": {
+    "level": "INFO",
+    "log_file": "./logs/replication_enhanced.log",
+    "max_log_size_mb": 100,
+    "backup_count": 5
+  },
+  "monitoring": {
+    "health_check_interval_seconds": 60,
+    "connection_timeout_seconds": 30,
+    "query_timeout_seconds": 300
+  }
+}
