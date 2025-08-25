@@ -1,0 +1,49 @@
+services:
+  mssql-master:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql-master
+    hostname: mssql-master
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrongPassword!123
+      - MSSQL_PID=Developer
+    ports:
+      - "3433:1433"
+    volumes:
+      - ./mssql-master-data:/var/opt/mssql
+    networks:
+      - mssql-net
+
+  mssql-alpha:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql-alpha
+    hostname: mssql-alpha
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrongPassword!123
+      - MSSQL_PID=Developer
+    ports:
+      - "3434:1433"
+    volumes:
+      - ./mssql-alpha-data:/var/opt/mssql
+    networks:
+      - mssql-net
+
+  mssql-beta:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql-beta
+    hostname: mssql-beta
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrongPassword!123
+      - MSSQL_PID=Developer
+    ports:
+      - "3435:1433"
+    volumes:
+      - ./mssql-beta-data:/var/opt/mssql
+    networks:
+      - mssql-net
+
+networks:
+  mssql-net:
+    driver: bridge

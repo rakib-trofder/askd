@@ -27,32 +27,32 @@ def execute_sql(conn_string, sql_command, params=None):
 
 def setup_replication(config):
     """Sets up SQL Server Transactional Replication based on a JSON config."""
-    master_config = config['master_db']
-    replicas_config = config['replicas']
-    replication_config = config['replication']
+    master_config = config['master_database']
+    replicas_config = config['replica_databases']
+    schemas_config = config['schemas_to_replicate']
 
     # Updated connection strings with port
-    master_conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={master_config['host']},{master_config['port']};UID={master_config['user']};PWD={master_config['password']}"
-    master_conn_str_db = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={master_config['host']},{master_config['port']};DATABASE={master_config['database']};UID={master_config['user']};PWD={master_config['password']}"
+    master_conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={master_config['host']},{master_config['port']};UID={master_config['username']};PWD={master_config['password']}"
+    master_conn_str_db = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={master_config['host']},{master_config['port']};DATABASE={master_config['database']};UID={master_config['username']};PWD={master_config['password']}"
 
     # Step 1: Create the database and tables on replicas
     print("\n--- Creating databases and tables on replicas ---")
     for replica in replicas_config:
         # Updated connection strings with port
-        replica_conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={replica['host']},{replica['port']};UID={replica['user']};PWD={replica['password']}"
-        replica_conn_str_db = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={replica['host']},{replica['port']};DATABASE={replica['database']};UID={replica['user']};PWD={replica['password']}"
+        replica_conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={replica['host']},{replica['port']};UID={replica['username']};PWD={replica['password']}"
+        replica_conn_str_db = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={replica['host']},{replica['port']};DATABASE={replica['database']};UID={replica['username']};PWD={replica['password']}"
 
         # Create database
         create_db_sql = f"CREATE DATABASE {replica['database']};"
         execute_sql(replica_conn_str, create_db_sql)
 
         # Get table schema from master and create on replicas
-        for schema in replication_config['schemas']:
+        for schema in schemas_config:
             for table in schema['tables']:
                 get_schema_sql = f"""
                     SELECT c.COLUMN_NAME, c.DATA_TYPE, c.CHARACTER_MAXIMUM_LENGTH, c.IS_NULLABLE
                     FROM INFORMATION_SCHEMA.COLUMNS c
-                    WHERE c.TABLE_SCHEMA = '{schema['schema_name']}' AND c.TABLE_NAME = '{table}';
+                    WHERE c.TABLE_SCHEMA = '{schema['schema_name']}' AND c.TABLE_NAME = '{table['table_name']}';
                 """
                 conn = pyodbc.connect(master_conn_str_db)
                 cursor = conn.cursor()
@@ -74,7 +74,7 @@ def setup_replication(config):
 
                     create_table_sql = f"""
                         USE {replica['database']};
-                        CREATE TABLE [{schema['schema_name']}].[{table}] ({', '.join(column_defs)});
+                        CREATE TABLE [{schema['schema_name']}].[{table['table_name']}] ({', '.join(column_defs)});
                     """
                     execute_sql(replica_conn_str_db, create_table_sql)
 
@@ -97,7 +97,7 @@ def setup_replication(config):
     # Step 3: Create the publication
     print("\n--- Creating Publication ---")
     publication_sql = f"""
-        USE {replication_config['publisher_database']};
+        USE {master_config['database']};
         EXEC sp_addpublication @publication = N'AskdTransactionalPublication',
                                @description = N'Transactional publication of askd database.',
                                @sync_method = N'concurrent',
@@ -108,25 +108,25 @@ def setup_replication(config):
 
     # Step 4: Add articles (tables) to the publication
     print("\n--- Adding Articles to Publication ---")
-    for schema in replication_config['schemas']:
+    for schema in schemas_config:
         for table in schema['tables']:
             article_sql = f"""
-                USE {replication_config['publisher_database']};
+                USE {master_config['database']};
                 EXEC sp_addarticle @publication = N'AskdTransactionalPublication',
-                                   @article = N'{table}',
-                                   @source_object = N'{table}',
+                                   @article = N'{table['table_name']}',
+                                   @source_object = N'{table['table_name']}',
                                    @source_owner = N'{schema['schema_name']}',
-                                   @destination_table = N'{table}';
+                                   @destination_table = N'{table['table_name']}';
             """
             execute_sql(master_conn_str_db, article_sql)
 
     # Step 5: Add subscriptions for each replica
     print("\n--- Adding Subscriptions for Replicas ---")
     for replica in replicas_config:
-        replica_conn_str_db = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={replica['host']},{replica['port']};DATABASE={replica['database']};UID={replica['user']};PWD={replica['password']}"
+        replica_conn_str_db = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={replica['host']},{replica['port']};DATABASE={replica['database']};UID={replica['username']};PWD={replica['password']}"
 
         subscription_sql = f"""
-            USE {replication_config['publisher_database']};
+            USE {master_config['database']};
             EXEC sp_addsubscription @publication = N'AskdTransactionalPublication',
                                     @subscriber = N'{replica['host']},{replica['port']}',
                                     @destination_db = N'{replica['database']}',
@@ -137,7 +137,7 @@ def setup_replication(config):
             EXEC sp_addpushsubscription_agent @publication = N'AskdTransactionalPublication',
                                                @subscriber = N'{replica['host']},{replica['port']}',
                                                @subscriber_db = N'{replica['database']}',
-                                               @job_login = N'{master_config['user']}',
+                                               @job_login = N'{master_config['username']}',
                                                @job_password = N'{master_config['password']}',
                                                @subscriber_security_mode = 1;
         """
@@ -145,12 +145,12 @@ def setup_replication(config):
 
 if __name__ == "__main__":
     try:
-        with open('config.json', 'r') as f:
+        with open('replication_config_enhanced.json', 'r') as f:
             config = json.load(f)
         setup_replication(config)
         print("\nReplication setup completed successfully! 🎉")
         print("Note: The SQL Server Agent must be running on the master for continuous replication.")
     except FileNotFoundError:
-        print("Error: config.json not found.")
+        print("Error: replication_config_enhanced.json not found.")
     except Exception as e:
         print(f"An error occurred: {e}")

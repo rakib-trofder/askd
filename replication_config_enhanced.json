@@ -8,7 +8,8 @@
     "auto_setup_replicas": true,
     "create_missing_schemas": true,
     "create_missing_tables": true,
-    "replicate_deletes": true
+    "replicate_deletes": true,
+    "distributor_admin_password": "YourStrongPassword!123"
   },
   "master_database": {
     "host": "202.4.127.187",
@@ -66,7 +67,7 @@
   "logging": {
     "level": "INFO",
     "log_file": "./logs/replication_enhanced.log",
-    "max_log_size_mb": 100,
+    "max_log_size_mb": 1,
     "backup_count": 5
   },
   "monitoring": {
