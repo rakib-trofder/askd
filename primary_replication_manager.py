@@ -154,8 +154,8 @@ def setup_replication(config):
             EXEC sp_addpushsubscription_agent @publication = N'AskdTransactionalPublication',
                                                @subscriber = N'{replica['host']},{replica['port']}',
                                                @subscriber_db = N'{replica['database']}',
-                                               @job_login = N'distributor_admin',  # <--- Changed this line
-                                               @job_password = N'{distributor_password}', # <--- Changed this line
+                                               @job_login = N'distributor_admin',
+                                               @job_password = N'{distributor_password}',
                                                @subscriber_security_mode = 1,
                                                @frequency_type = 4,
                                                @frequency_interval = 1,
@@ -164,6 +164,7 @@ def setup_replication(config):
                                                @frequency_subday = 4,
                                                @frequency_subday_interval = {sync_interval};
         """
+        print(subscription_sql)
         execute_sql(master_conn_str_db, subscription_sql)
 
 if __name__ == "__main__":
