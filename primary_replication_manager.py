@@ -30,6 +30,11 @@ def setup_replication(config):
     master_config = config['master_database']
     replicas_config = config['replica_databases']
     schemas_config = config['schemas_to_replicate']
+    replication_config = config['replication']
+    
+    # Get sync interval and distributor admin password from configuration
+    sync_interval = replication_config.get('sync_interval_seconds', 15)
+    distributor_password = replication_config.get('distributor_admin_password')
 
     # Updated connection strings with port
     master_conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={master_config['host']},{master_config['port']};UID={master_config['username']};PWD={master_config['password']}"
@@ -68,7 +73,7 @@ def setup_replication(config):
                         if max_len is not None and data_type in ['nvarchar', 'varchar', 'char', 'nchar']:
                             col_def += f"({max_len})"
                         elif data_type in ['decimal', 'numeric']:
-                            col_def += "(18, 2)" # Default precision/scale, adjust as needed
+                            col_def += "(18, 2)"
                         col_def += " NOT NULL" if is_nullable == "NO" else " NULL"
                         column_defs.append(col_def)
 
@@ -82,15 +87,29 @@ def setup_replication(config):
     print("\nWaiting for databases and tables to be ready...")
     time.sleep(10)
 
-    # Step 2: Configure the Distributor on the master
-    print("\n--- Configuring Distributor ---")
+    # Step 2: Configure the Distributor on the master and create the distributor_admin login
+    print("\n--- Configuring Distributor and creating replication login ---")
+    
+    # Create the distributor_admin login and a user for the distribution database
+    login_sql = f"""
+        USE master;
+        IF NOT EXISTS (SELECT name FROM sys.server_principals WHERE name = 'distributor_admin')
+        BEGIN
+            CREATE LOGIN [distributor_admin] WITH PASSWORD = N'{distributor_password}', CHECK_EXPIRATION = OFF, CHECK_POLICY = OFF;
+        END;
+    """
+    execute_sql(master_conn_str, login_sql)
+
     distributor_sql = f"""
         USE master;
-        EXEC sp_adddistributor @distributor = '{master_config['host']},{master_config['port']}', @password = N'distributor_password';
+        EXEC sp_adddistributor @distributor = N'{master_config['host']},{master_config['port']}',
+                               @password = N'{distributor_password}';
         EXEC sp_adddistributiondb @database = N'distribution';
         EXEC sp_adddistpublisher @publisher = N'{master_config['host']},{master_config['port']}',
                                  @distribution_db = N'distribution',
-                                 @security_mode = 1;
+                                 @security_mode = 0,
+                                 @login = N'distributor_admin',
+                                 @password = N'{distributor_password}';
     """
     execute_sql(master_conn_str, distributor_sql)
 
@@ -123,23 +142,27 @@ def setup_replication(config):
     # Step 5: Add subscriptions for each replica
     print("\n--- Adding Subscriptions for Replicas ---")
     for replica in replicas_config:
-        replica_conn_str_db = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={replica['host']},{replica['port']};DATABASE={replica['database']};UID={replica['username']};PWD={replica['password']}"
-
         subscription_sql = f"""
             USE {master_config['database']};
             EXEC sp_addsubscription @publication = N'AskdTransactionalPublication',
-                                    @subscriber = N'{replica['host']},{replica['port']}',
-                                    @destination_db = N'{replica['database']}',
-                                    @subscription_type = N'Push',
-                                    @sync_type = N'automatic',
-                                    @article = 'all';
+                                     @subscriber = N'{replica['host']},{replica['port']}',
+                                     @destination_db = N'{replica['database']}',
+                                     @subscription_type = N'Push',
+                                     @sync_type = N'automatic',
+                                     @article = 'all';
 
             EXEC sp_addpushsubscription_agent @publication = N'AskdTransactionalPublication',
                                                @subscriber = N'{replica['host']},{replica['port']}',
                                                @subscriber_db = N'{replica['database']}',
-                                               @job_login = N'{master_config['username']}',
-                                               @job_password = N'{master_config['password']}',
-                                               @subscriber_security_mode = 1;
+                                               @job_login = N'distributor_admin',  # <--- Changed this line
+                                               @job_password = N'{distributor_password}', # <--- Changed this line
+                                               @subscriber_security_mode = 1,
+                                               @frequency_type = 4,
+                                               @frequency_interval = 1,
+                                               @frequency_relative_interval = 1,
+                                               @frequency_recurrence_factor = 0,
+                                               @frequency_subday = 4,
+                                               @frequency_subday_interval = {sync_interval};
         """
         execute_sql(master_conn_str_db, subscription_sql)
 
