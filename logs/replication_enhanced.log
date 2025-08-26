@@ -1,0 +1,43 @@
+2025-08-26 14:55:57,088 - ERROR - Error connecting to 202.4.127.187:3433. SQLSTATE: 42000
+2025-08-26 14:55:57,090 - ERROR - ('42000', '[42000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Cannot open database "askd" requested by the login. The login failed. (4060) (SQLDriverConnect)')
+2025-08-26 14:55:57,091 - CRITICAL - Could not connect to master database. Aborting setup.
+2025-08-26 14:56:56,071 - INFO - Successfully connected to 202.4.127.187:3433
+2025-08-26 14:56:56,112 - INFO - Executed SQL: IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'askd') CREATE DATABASE askd;
+2025-08-26 14:56:56,120 - INFO - Executed SQL: USE askd;
+2025-08-26 14:56:56,134 - INFO - Executed SQL: IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = 'dbo') EXEC('CREATE SCHEMA dbo');
+2025-08-26 14:56:56,205 - ERROR - Error executing SQL: IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Employees]') AND type in (N'U'))
+            BEGIN
+                CREATE TABLE [dbo].[Employees](
+                    [EmployeeID] [int] IDENTITY(1,1) NOT NULL,
+                    [Data] [nvarchar](100) NULL,
+                    [ModifiedDate] [datetime] NOT NULL DEFAULT GETDATE(),
+                    CONSTRAINT [PK_Employees] PRIMARY KEY CLUSTERED ([EmployeeID] ASC)
+                );
+                ALTER TABLE [dbo].[Employees] ADD CONSTRAINT DF_Employees_ModifiedDate DEFAULT GETDATE() FOR [ModifiedDate];
+            END
+2025-08-26 14:56:56,207 - ERROR - ('42000', '[42000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Column already has a DEFAULT bound to it. (1781) (SQLExecDirectW)')
+2025-08-26 14:57:37,099 - INFO - Successfully connected to 202.4.127.187:3433
+2025-08-26 14:57:37,107 - INFO - Executed SQL: IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'askd') CREATE DATABASE askd;
+2025-08-26 14:57:37,114 - INFO - Executed SQL: USE askd;
+2025-08-26 14:57:37,121 - INFO - Executed SQL: IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = 'dbo') EXEC('CREATE SCHEMA dbo');
+2025-08-26 14:57:37,131 - INFO - Executed SQL: IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Employees]') AND type in (N'U'))
+            BEGIN
+                CREATE TABLE [dbo].[Employees](
+                    [EmployeeID] [int] IDENTITY(1,1) NOT NULL,
+                    [Data] [nvarchar](100) NULL,
+                    [ModifiedDate] [datetime] NOT NULL DEFAULT GETDATE(),
+                    CONSTRAINT [PK_Employees] PRIMARY KEY CLUSTERED ([EmployeeID] ASC)
+                );
+                ALTER TABLE [dbo].[Employees] ADD CONSTRAINT DF_Employees_ModifiedDate DEFAULT GETDATE() FOR [ModifiedDate];
+            END
+2025-08-26 14:57:37,160 - ERROR - Error executing SQL: IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Projects]') AND type in (N'U'))
+            BEGIN
+                CREATE TABLE [dbo].[Projects](
+                    [ProjectID] [int] IDENTITY(1,1) NOT NULL,
+                    [Data] [nvarchar](100) NULL,
+                    [ModifiedDate] [datetime] NOT NULL DEFAULT GETDATE(),
+                    CONSTRAINT [PK_Projects] PRIMARY KEY CLUSTERED ([ProjectID] ASC)
+                );
+                ALTER TABLE [dbo].[Projects] ADD CONSTRAINT DF_Projects_ModifiedDate DEFAULT GETDATE() FOR [ModifiedDate];
+            END
+2025-08-26 14:57:37,163 - ERROR - ('42000', '[42000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Column already has a DEFAULT bound to it. (1781) (SQLExecDirectW)')
