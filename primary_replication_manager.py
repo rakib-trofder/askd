@@ -102,10 +102,10 @@ def setup_replication(config):
 
     distributor_sql = f"""
         USE master;
-        EXEC sp_adddistributor @distributor = N'{master_config['host']},{master_config['port']}',
+        EXEC sp_adddistributor @distributor = @@SERVERNAME,
                                @password = N'{distributor_password}';
         EXEC sp_adddistributiondb @database = N'distribution';
-        EXEC sp_adddistpublisher @publisher = N'{master_config['host']},{master_config['port']}',
+        EXEC sp_adddistpublisher @publisher = @@SERVERNAME,
                                  @distribution_db = N'distribution',
                                  @security_mode = 0,
                                  @login = N'distributor_admin',
@@ -123,6 +123,7 @@ def setup_replication(config):
                                @repl_freq = N'continuous',
                                @status = N'active';
     """
+    print(publication_sql)
     execute_sql(master_conn_str_db, publication_sql)
 
     # Step 4: Add articles (tables) to the publication
@@ -164,14 +165,14 @@ def setup_replication(config):
         subscription_sql = f"""
             USE {master_config['database']};
             EXEC sp_addsubscription @publication = N'AskdTransactionalPublication',
-                                     @subscriber = N'{replica['host']},{replica['port']}',
+                                     @subscriber = @@SERVERNAME,
                                      @destination_db = N'{replica['database']}',
                                      @subscription_type = N'Push',
                                      @sync_type = N'automatic',
                                      @article = 'all';
 
             EXEC sp_addpushsubscription_agent @publication = N'AskdTransactionalPublication',
-                                               @subscriber = N'{replica['host']},{replica['port']}',
+                                               @subscriber = @@SERVERNAME,
                                                @subscriber_db = N'{replica['database']}',
                                                @job_login = N'distributor_admin',
                                                @job_password = N'{distributor_password}',

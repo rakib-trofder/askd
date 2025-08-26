@@ -95,20 +95,29 @@ def setup_master_and_replicas(config):
             pk_column = table['primary_key']
             ts_column = table['timestamp_column']
             
-            # A more robust table creation for demonstration
+            # Create the table if it doesn't exist
             create_table_sql = f"""
             IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[{schema_name}].[{table_name}]') AND type in (N'U'))
             BEGIN
                 CREATE TABLE [{schema_name}].[{table_name}](
                     [{pk_column}] [int] IDENTITY(1,1) NOT NULL,
                     [Data] [nvarchar](100) NULL,
-                    [{ts_column}] [datetime] NOT NULL DEFAULT GETDATE(),
+                    [{ts_column}] [datetime] NOT NULL,
                     CONSTRAINT [PK_{table_name}] PRIMARY KEY CLUSTERED ([{pk_column}] ASC)
                 );
-                ALTER TABLE [{schema_name}].[{table_name}] ADD CONSTRAINT DF_{table_name}_{ts_column} DEFAULT GETDATE() FOR [{ts_column}];
             END
             """
             execute_sql(master_conn, create_table_sql)
+            
+            # Add the default constraint if it doesn't exist
+            add_constraint_sql = f"""
+            IF NOT EXISTS (SELECT * FROM sys.default_constraints WHERE parent_object_id = OBJECT_ID(N'[{schema_name}].[{table_name}]') AND name = N'DF_{table_name}_{ts_column}')
+            BEGIN
+                ALTER TABLE [{schema_name}].[{table_name}] ADD CONSTRAINT DF_{table_name}_{ts_column} DEFAULT GETDATE() FOR [{ts_column}];
+            END
+            """
+            execute_sql(master_conn, add_constraint_sql)
+
 
     # --- Configure Distributor on Master ---
     logging.info("Configuring the Distributor...")
