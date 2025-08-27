@@ -180,7 +180,7 @@ def print_replication_queries(config):
                                                @frequency_subday = 4,
                                                @frequency_subday_interval = {sync_interval};
         """
-        print_sql(master_conn_str_db, subscription_sql, f"Add Subscription for Replica {i+1} ({replica_server_name})")
+        print_sql(master_conn_str_db, subscription_sql, f"Add Subscription for Replica ({replica_server_name})")
 
     print("✅ REPLICATION SETUP QUERIES PREVIEW COMPLETED!".center(80, "="))
     print()
