@@ -12,6 +12,7 @@
     "distributor_admin_password": "YourStrongPassword!123"
   },
   "master_database": {
+    "name": "mssql-master",
     "host": "202.4.127.187",
     "port": 3433,
     "username": "SA",
@@ -20,7 +21,7 @@
   },
   "replica_databases": [
     {
-      "name": "alpha-replica",
+      "name": "mssql-alpha",
       "host": "202.4.127.187",
       "port": 3434,
       "username": "SA",
@@ -28,7 +29,7 @@
       "database": "askd"
     },
     {
-      "name": "beta-replica",
+      "name": "mssql-beta",
       "host": "202.4.127.187",
       "port": 3435,
       "username": "SA",
